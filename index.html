@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reproductor Interactivo por Gestos</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="tailwind.min.js"></script>
+  <!-- MediaPipe Hands & Camera Utils -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+  <style>
+    body {
+      background-color: #000000;
+      color: #ffffff;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body class="h-screen w-screen flex flex-col justify-between bg-black text-white p-4 select-none">
+
+  <!-- Encabezado minimalista -->
+  <header class="flex justify-between items-center py-2 px-4 border-b border-zinc-800">
+    <div class="flex items-center space-x-2">
+      <div id="status-dot" class="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
+      <h1 class="text-sm font-medium text-zinc-200 tracking-wide">Reproductor por Gestos</h1>
+    </div>
+    <div class="text-xs text-zinc-400 space-x-4">
+      <span><kbd class="px-1.5 py-0.5 bg-zinc-800 rounded border border-zinc-700 text-zinc-200">Espacio</kbd> Cambiar Video</span>
+      <span class="hidden sm:inline">| <strong class="text-emerald-400">Junta pulgar y dedo:</strong> Adelantar | <strong class="text-sky-400">Sepáralos:</strong> Atrasar</span>
+    </div>
+  </header>
+
+  <!-- Contenedor principal del video -->
+  <main id="video-container" class="relative flex-1 my-3 flex items-center justify-center bg-black overflow-hidden rounded-lg border border-zinc-900">
+    <video id="main-video" class="max-h-full max-w-full object-contain pointer-events-none" playsinline muted loop></video>
+
+    <!-- Overlay de Permiso de Cámara -->
+    <div id="camera-start-overlay" class="absolute inset-0 bg-black/95 flex flex-col items-center justify-center z-30 p-6 text-center transition-opacity duration-300">
+      <div class="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mb-4">
+        <svg class="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+        </svg>
+      </div>
+      <h2 class="text-lg font-semibold text-zinc-100 mb-2">Control por Gestos de Mano</h2>
+      <p class="text-xs text-zinc-400 max-w-md mb-6 leading-relaxed">
+        Haz clic en el botón a continuación para autorizar la cámara. Los navegadores requieren una acción del usuario para otorgar permisos.
+      </p>
+      <button id="start-camera-btn" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-lg shadow-lg shadow-emerald-950/50 transition duration-200 flex items-center space-x-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <span>Activar Cámara y Gestos</span>
+      </button>
+    </div>
+
+    <!-- Overlay de Carga inicial (MediaPipe) -->
+    <div id="loading-overlay" class="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-20 transition-opacity duration-300 hidden">
+      <div class="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin mb-3"></div>
+      <p id="loading-text" class="text-xs text-zinc-300 font-medium">Iniciando MediaPipe Hands...</p>
+    </div>
+
+    <!-- Overlay de Error de Cámara -->
+    <div id="camera-error-overlay" class="absolute inset-0 bg-zinc-950/95 flex flex-col items-center justify-center z-25 hidden text-center p-6 border border-red-900/50 rounded-lg">
+      <svg class="w-10 h-10 text-rose-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+      </svg>
+      <p class="text-sm font-semibold text-zinc-200 mb-1">Permiso de Cámara Denegado o Bloqueado</p>
+      <p id="camera-error-msg" class="text-xs text-zinc-400 max-w-md mb-4 leading-relaxed">
+        El navegador o el entorno ha bloqueado el acceso a la cámara. Revisa los permisos en la barra de direcciones o reintenta haciendo clic abajo.
+      </p>
+      <button id="retry-camera-btn" class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium rounded-md border border-zinc-700 transition">
+        Reintentar Permiso
+      </button>
+    </div>
+
+    <!-- Overlay de Error de Video -->
+    <div id="error-overlay" class="absolute inset-0 bg-zinc-950/90 flex flex-col items-center justify-center z-15 hidden text-center p-6 border border-zinc-800 rounded-lg">
+      <svg class="w-10 h-10 text-amber-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+      </svg>
+      <p id="error-title" class="text-sm font-semibold text-zinc-200">No se pudo cargar el archivo local</p>
+      <p id="error-msg" class="text-xs text-zinc-400 max-w-md mt-1 mb-4">El archivo de video local no está disponible en este entorno.</p>
+      <button id="fallback-btn" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded transition">
+        Cargar video de muestra web
+      </button>
+    </div>
+
+    <!-- Indicador de Gesto Flotante -->
+    <div id="gesture-badge" class="absolute top-4 right-6 bg-zinc-950/80 backdrop-blur border border-zinc-800 rounded-full px-3 py-1 text-xs text-zinc-300 font-mono z-10 hidden">
+      Gesto: <span id="gesture-text" class="font-bold text-emerald-400">Detectando...</span>
+    </div>
+
+    <!-- Barra de progreso -->
+    <div class="absolute bottom-4 left-6 right-6 bg-zinc-950/80 backdrop-blur border border-zinc-800 rounded-lg p-2.5 flex items-center space-x-3 z-10">
+      <span id="current-time" class="text-xs font-mono text-zinc-400 w-10 text-right">00:00</span>
+      <div class="flex-1 bg-zinc-800 h-1.5 rounded-full relative overflow-hidden">
+        <div id="progress-bar" class="bg-emerald-400 h-full w-0 transition-all duration-75"></div>
+      </div>
+      <span id="total-time" class="text-xs font-mono text-zinc-500 w-10">00:00</span>
+    </div>
+  </main>
+
+  <!-- Elemento de video oculto para captura de cámara -->
+  <video id="webcam-feed" class="hidden" autoplay playsinline muted></video>
+
+  <!-- Ventana de Cámara en Esquina (PiP) -->
+  <div class="fixed bottom-16 right-6 z-30 bg-zinc-900/90 border border-zinc-800 p-1.5 rounded-lg shadow-xl">
+    <div class="text-[10px] text-zinc-400 mb-1 px-1 flex justify-between items-center">
+      <span>Cámara IA</span>
+      <span id="detection-text" class="text-yellow-400 font-medium">En Espera</span>
+    </div>
+    <canvas id="pip-canvas" width="180" height="135" class="rounded border border-zinc-800 bg-black"></canvas>
+  </div>
+
+  <!-- Pie de página -->
+  <footer class="flex justify-between items-center px-2 py-1 text-xs text-zinc-500 border-t border-zinc-900">
+    <span id="video-title">Cargando video...</span>
+    <span>Gesto: Pulgar + Dedo (Juntar = Adelantar, Separar = Atrasar)</span>
+  </footer>
+
+  <script>
+    // Lista de videos con URLs locales y URLs web directas (.mp4) de respaldo
+    const videoList = [
+      {
+        title: "Video 1 - Elephants Dream",
+        url: "yaloh007_pindown.io_1788099141.mp4",
+        fallbackUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
+      },
+      {
+        title: "Video 2 - Tears of Steel",
+        url: "Yowerer_pindown.io_1788099403.mp4",
+        fallbackUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4"
+      },
+      {
+        title: "Video 3 - For Bigger Blazes",
+        url: "AnatoliyIP_pindown.io_1788099777.mp4",
+        fallbackUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+      }
+    ];
+
+    let currentVideoIndex = 0;
+    const videoElement = document.getElementById('main-video');
+    const webcamVideo = document.getElementById('webcam-feed');
+    const pipCanvas = document.getElementById('pip-canvas');
+    const pipCtx = pipCanvas.getContext('2d');
+
+    let targetTimeRatio = 0.5;
+    let smoothedRatio = 0.5;
+    let cameraStarted = false;
+
+    // DOM Elements
+    const progressBar = document.getElementById('progress-bar');
+    const currentTimeEl = document.getElementById('current-time');
+    const totalTimeEl = document.getElementById('total-time');
+    const videoTitleEl = document.getElementById('video-title');
+    const detectionText = document.getElementById('detection-text');
+    const statusDot = document.getElementById('status-dot');
+
+    const startOverlay = document.getElementById('camera-start-overlay');
+    const startCameraBtn = document.getElementById('start-camera-btn');
+    const cameraErrorOverlay = document.getElementById('camera-error-overlay');
+    const cameraErrorMsg = document.getElementById('camera-error-msg');
+    const retryCameraBtn = document.getElementById('retry-camera-btn');
+    const loadingOverlay = document.getElementById('loading-overlay');
+
+    const errorOverlay = document.getElementById('error-overlay');
+    const errorTitle = document.getElementById('error-title');
+    const errorMsg = document.getElementById('error-msg');
+    const fallbackBtn = document.getElementById('fallback-btn');
+    const gestureBadge = document.getElementById('gesture-badge');
+    const gestureText = document.getElementById('gesture-text');
+
+    const HAND_CONNECTIONS = [
+      [0, 1], [1, 2], [2, 3], [3, 4],
+      [0, 5], [5, 6], [6, 7], [7, 8],
+      [5, 9], [9, 10], [10, 11], [11, 12],
+      [9, 13], [13, 14], [14, 15], [15, 16],
+      [13, 17], [17, 18], [18, 19], [19, 20],
+      [0, 17]
+    ];
+
+    videoElement.addEventListener('error', function() {
+      console.warn("No se pudo cargar el archivo local:", videoElement.src);
+      const currentItem = videoList[currentVideoIndex];
+      
+      errorOverlay.classList.remove('hidden');
+      errorTitle.textContent = `Archivo no encontrado: ${currentItem.url}`;
+      errorMsg.textContent = "Verifica el nombre del archivo en tu carpeta 'proyecto'. Haz clic abajo para probar la versión web pública.";
+      
+      fallbackBtn.onclick = function() {
+        errorOverlay.classList.add('hidden');
+        videoElement.src = currentItem.fallbackUrl;
+        videoTitleEl.textContent = `${currentItem.title} (Muestra Web Directa)`;
+        videoElement.load();
+      };
+    });
+
+    loadVideo(currentVideoIndex);
+
+    // MediaPipe Setup
+    const hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    hands.onResults(onHandResults);
+
+    let cameraInstance = null;
+
+    async function startCameraPermission() {
+      cameraErrorOverlay.classList.add('hidden');
+      startOverlay.classList.add('hidden');
+      loadingOverlay.classList.remove('hidden');
+      detectionText.textContent = "Conectando...";
+      detectionText.className = "text-yellow-400 font-medium";
+
+      try {
+        if (!cameraInstance) {
+          cameraInstance = new Camera(webcamVideo, {
+            onFrame: async () => {
+              await hands.send({ image: webcamVideo });
+            },
+            width: 320,
+            height: 240
+          });
+        }
+        await cameraInstance.start();
+        cameraStarted = true;
+      } catch (err) {
+        console.error("Error al acceder a la cámara:", err);
+        loadingOverlay.classList.add('hidden');
+        cameraErrorOverlay.classList.remove('hidden');
+        cameraErrorMsg.textContent = "El acceso a la cámara fue bloqueado. Revisa los permisos en la barra del navegador.";
+        detectionText.textContent = "Error Cámara";
+        detectionText.className = "text-red-400 font-medium";
+      }
+    }
+
+    startCameraBtn.addEventListener('click', startCameraPermission);
+    retryCameraBtn.addEventListener('click', startCameraPermission);
+
+    function onHandResults(results) {
+      if (loadingOverlay && !loadingOverlay.classList.contains('hidden')) {
+        loadingOverlay.classList.add('opacity-0');
+        setTimeout(() => loadingOverlay.classList.add('hidden'), 300);
+        statusDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500";
+      }
+
+      pipCtx.save();
+      pipCtx.clearRect(0, 0, pipCanvas.width, pipCanvas.height);
+      pipCtx.translate(pipCanvas.width, 0);
+      pipCtx.scale(-1, 1);
+      pipCtx.drawImage(results.image, 0, 0, pipCanvas.width, pipCanvas.height);
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        const landmarks = results.multiHandLandmarks[0];
+        
+        detectionText.textContent = "Mano Detectada";
+        detectionText.className = "text-emerald-400 font-medium";
+
+        drawSkeleton(landmarks);
+
+        const thumbTip = landmarks[4];
+        const indexTip = landmarks[8];
+        const middleTip = landmarks[12];
+        const wrist = landmarks[0];
+        const middleMCP = landmarks[9];
+
+        const handScale = Math.hypot(wrist.x - middleMCP.x, wrist.y - middleMCP.y) || 0.2;
+        const distIndex = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+        const distMiddle = Math.hypot(thumbTip.x - middleTip.x, thumbTip.y - middleTip.y);
+        const minPinchDist = Math.min(distIndex, distMiddle);
+
+        const normalizedPinch = minPinchDist / handScale;
+
+        const minRange = 0.22;
+        const maxRange = 0.85;
+
+        let clampedPinch = Math.max(minRange, Math.min(maxRange, normalizedPinch));
+        let calculatedRatio = 1.0 - ((clampedPinch - minRange) / (maxRange - minRange));
+
+        targetTimeRatio = calculatedRatio;
+
+        gestureBadge.classList.remove('hidden');
+        if (calculatedRatio > 0.65) {
+          gestureText.textContent = "Cerrando -> Adelantar ⏩";
+          gestureText.className = "font-bold text-emerald-400";
+        } else if (calculatedRatio < 0.35) {
+          gestureText.textContent = "Abriendo -> Atrasar ⏪";
+          gestureText.className = "font-bold text-sky-400";
+        } else {
+          gestureText.textContent = "Punto Medio ⏸️";
+          gestureText.className = "font-bold text-yellow-400";
+        }
+
+        const p1X = thumbTip.x * pipCanvas.width;
+        const p1Y = thumbTip.y * pipCanvas.height;
+        const p2X = indexTip.x * pipCanvas.width;
+        const p2Y = indexTip.y * pipCanvas.height;
+
+        pipCtx.strokeStyle = calculatedRatio > 0.5 ? '#10b981' : '#38bdf8';
+        pipCtx.lineWidth = 3;
+        pipCtx.beginPath();
+        pipCtx.moveTo(p1X, p1Y);
+        pipCtx.lineTo(p2X, p2Y);
+        pipCtx.stroke();
+
+        pipCtx.fillStyle = '#ffffff';
+        pipCtx.beginPath();
+        pipCtx.arc(p1X, p1Y, 4, 0, 2 * Math.PI);
+        pipCtx.arc(p2X, p2Y, 4, 0, 2 * Math.PI);
+        pipCtx.fill();
+
+      } else {
+        detectionText.textContent = "Buscando mano...";
+        detectionText.className = "text-yellow-400";
+        gestureBadge.classList.add('hidden');
+      }
+
+      pipCtx.restore();
+    }
+
+    function drawSkeleton(landmarks) {
+      pipCtx.strokeStyle = 'rgba(0, 229, 255, 0.4)';
+      pipCtx.lineWidth = 1.5;
+
+      HAND_CONNECTIONS.forEach(([i, j]) => {
+        const p1 = landmarks[i];
+        const p2 = landmarks[j];
+        pipCtx.beginPath();
+        pipCtx.moveTo(p1.x * pipCanvas.width, p1.y * pipCanvas.height);
+        pipCtx.lineTo(p2.x * pipCanvas.width, p2.y * pipCanvas.height);
+        pipCtx.stroke();
+      });
+
+      pipCtx.fillStyle = '#ffffff';
+      landmarks.forEach((pt) => {
+        pipCtx.beginPath();
+        pipCtx.arc(pt.x * pipCanvas.width, pt.y * pipCanvas.height, 2, 0, 2 * Math.PI);
+        pipCtx.fill();
+      });
+    }
+
+    function updateTimeline() {
+      if (videoElement && !isNaN(videoElement.duration) && videoElement.duration > 0) {
+        smoothedRatio += (targetTimeRatio - smoothedRatio) * 0.18;
+        let targetTime = smoothedRatio * videoElement.duration;
+
+        if (videoElement.readyState >= 2 && !videoElement.seeking) {
+          if (Math.abs(videoElement.currentTime - targetTime) > 0.05) {
+            videoElement.currentTime = targetTime;
+          }
+        }
+
+        let percent = (smoothedRatio * 100).toFixed(2);
+        progressBar.style.width = `${percent}%`;
+
+        currentTimeEl.textContent = formatTime(videoElement.currentTime);
+        totalTimeEl.textContent = formatTime(videoElement.duration);
+      }
+
+      requestAnimationFrame(updateTimeline);
+    }
+    requestAnimationFrame(updateTimeline);
+
+    function loadVideo(index) {
+      errorOverlay.classList.add('hidden');
+      let item = videoList[index];
+      videoTitleEl.textContent = item.title;
+      videoElement.src = item.url;
+      videoElement.load();
+
+      videoElement.onloadedmetadata = function() {
+        totalTimeEl.textContent = formatTime(videoElement.duration);
+        videoElement.pause();
+      };
+    }
+
+    // Tecla Espacio para cambiar de video
+    window.addEventListener('keydown', function(e) {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        currentVideoIndex = (currentVideoIndex + 1) % videoList.length;
+        loadVideo(currentVideoIndex);
+      }
+    });
+
+    function formatTime(seconds) {
+      if (isNaN(seconds)) return "00:00";
+      let mins = Math.floor(seconds / 60);
+      let secs = Math.floor(seconds % 60);
+      return `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    }
+  </script>
+</body>
+</html>

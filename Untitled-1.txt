@@ -1,0 +1,67 @@
+Informe Técnico: Reproductor de Video Interactivo por Gestos
+
+1. Resumen Ejecutivo
+
+El Reproductor de Video Interactivo por Gestos es una aplicación web que permite controlar la línea de tiempo (timeline) de un video mediante visión por computadora y reconocimiento de gestos de la mano en tiempo real. Utilizando la cámara web del usuario, el sistema interpreta la apertura o el cierre de los dedos para adelantar o atrasar la reproducción de forma fluida y sin contacto.
+
+2. Tecnologías y Herramientas Utilizadas
+
+HTML5 & CSS3 (Tailwind CSS): Estructura del maquetado y diseño visual moderno en modo oscuro con utilidades responsivas.
+
+JavaScript (ES6+): Lógica del sistema, manipulación de la API HTML5 <video>, cálculos matemáticos y sincronización en tiempo real.
+
+MediaPipe Hands (Google): Modelo de aprendizaje automático (Machine Learning) capaz de detectar la mano y rastrear 21 puntos clave (landmarks) en 3D en cada fotograma.
+
+MediaPipe Camera Utils: Librería auxiliar para capturar y procesar de manera constante la transmisión de la webcam.
+
+HTML5 Canvas API: Utilizada para renderizar la ventana Picture-in-Picture (PiP), dibujando el esqueleto de la mano, los puntos de articulación y la línea indicadora del gesto en tiempo real.
+
+3. ¿Cómo Funciona el Sistema?
+
+El funcionamiento de la aplicación se divide en cuatro etapas principales:
+
+A. Captura de Cámara y Procesamiento de Imagen
+
+El usuario otorga permisos para usar la cámara web mediante un botón explícito de inicio.
+
+Cada fotograma capturado por la webcam se envía al modelo MediaPipe Hands.
+
+B. Extracción de Puntos Clave (Landmarks)
+
+MediaPipe analiza la imagen e identifica las coordenadas $(x, y, z)$ de las articulaciones de la mano. Para este control gestual se utilizan principalmente:
+
+Muñeca ($P_0$) y Nudillo Medio ($P_9$): Se usan para medir la escala física de la mano y garantizar que el gesto funcione igual si te acercas o te alejas de la cámara.
+
+Punta del Pulgar ($P_4$): Punto de control activo.
+
+Punta del Índice ($P_8$) / Medio ($P_{12}$): Puntos de control secundarios.
+
+C. Cálculo e Interpretación del Gesto (Pinch Gesture)
+
+Medición de Distancia Euclidiana: Se calcula la distancia entre el pulgar y el dedo índice/medio utilizando la fórmula:
+
+$$d = \sqrt{(x_2 - x_1)^2 + (y_2 - y_1)^2}$$
+
+Normalización por Escala de la Mano: La distancia se divide por el tamaño de la mano para obtener un valor proporcional e independiente de la distancia a la webcam.
+
+Mapeo de Línea de Tiempo:
+
+Juntar dedos (Pinza Cerrada): Se mapea a la posición máxima de tiempo ($100\%$ o final del video).
+
+Separar dedos (Mano Abierta): Se mapea al inicio del video ($0\%$).
+
+D. Interpolación y Sincronización Fluida (LERP)
+
+Para evitar cambios bruscos de cuadro cuando la mano tiembla ligeramente, se aplica un algoritmo de interpolación lineal (LERP) para suavizar el movimiento de la barra de tiempo:
+
+$$\text{Posición Actual} = \text{Posición Actual} + (\text{Posición Objetivo} - \text{Posición Actual}) \times \alpha$$
+
+donde $\alpha = 0.18$ proporciona un deslizamiento orgánico y suave.
+
+4. Estructura de Control y Experiencia de Usuario (UX)
+
+Feedback Visual (PiP Canvas): Muestra el esqueleto de la mano con una línea verde cuando se juntan los dedos (Adelantar) y azul cuando se separan (Atrasar).
+
+Control de Errores Integrado: Si un archivo de video local no existe en el disco, el sistema detecta la falla y permite cargar una fuente web de respaldo con un clic.
+
+Navegación Teclado: Se incluye la tecla Espacio para alternar rápidamente entre diferentes videos.
